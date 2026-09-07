@@ -328,6 +328,21 @@
             color: var(--text-primary);
         }
 
+        /* 공유 전용 뷰어 모드 배너 */
+        .share-mode-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            background: rgba(41, 151, 255, 0.15);
+            border: 1px solid rgba(41, 151, 255, 0.3);
+            color: #2997ff;
+            font-size: 11px;
+            font-weight: 500;
+            padding: 3px 8px;
+            border-radius: 6px;
+            letter-spacing: -0.01em;
+        }
+
         /* 애플 스타일 하위 폴더 탭 바 (Segmented Tabs) */
         .subfolder-tabs-bar {
             display: none;
@@ -857,6 +872,9 @@
                 </button>
                 <h2 id="currentProjName">모빌리티 LED</h2>
                 <span class="count-text" id="imageCount">0</span>
+                <div id="shareModeBadgeContainer" style="display: none;">
+                    <span class="share-mode-badge"><i data-lucide="eye" style="width: 12px; height: 12px;"></i> 읽기 전용 공유 뷰어</span>
+                </div>
             </div>
 
             <div class="topbar-controls">
@@ -868,11 +886,17 @@
                         <span class="slider-icon"><i data-lucide="image" style="width: 17px; height: 17px;"></i></span>
                     </div>
 
-                    <button class="apple-btn" onclick="promptAddUrl()" title="웹페이지 URL을 통한 대표 이미지 추가">
+                    <!-- 폴더 공유 버튼 -->
+                    <button class="apple-btn" id="btnShareFolder" onclick="copyFolderShareLink(currentProjectId)" title="이 폴더만 볼 수 있는 공유 링크 복사">
+                        <i data-lucide="share-2" style="width: 13px; height: 13px; color: #2997ff;"></i>
+                        <span>공유</span>
+                    </button>
+                    
+                    <button class="apple-btn" id="btnAddUrl" onclick="promptAddUrl()" title="웹페이지 URL을 통한 대표 이미지 추가">
                         <i data-lucide="link" style="width: 13px; height: 13px;"></i>
                         <span>URL 추가</span>
                     </button>
-                    <button class="apple-btn" onclick="document.getElementById('fileInput').click()">
+                    <button class="apple-btn" id="btnUpload" onclick="document.getElementById('fileInput').click()">
                         <i data-lucide="upload" style="width: 13px; height: 13px;"></i>
                         <span>가져오기</span>
                     </button>
@@ -961,11 +985,76 @@
         let currentLightboxIndex = 0;
         let collapsedProjects = new Set();
         let isSidebarCollapsed = false;
+        let isShareMode = false;
+        let shareFolderId = null;
+
+        // 폴더 공유 링크 복사 함수
+        function copyFolderShareLink(projectId) {
+            const targetId = projectId || currentProjectId;
+            const targetProj = projects.find(p => p.id === targetId);
+            const projName = targetProj ? targetProj.name : '폴더';
+            
+            const currentUrl = new URL(window.location.href);
+            currentUrl.searchParams.set('share', targetId);
+            const shareUrl = currentUrl.toString();
+
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(shareUrl).then(() => {
+                    showToast(`🔗 [${projName}] 전용 공유 링크가 복사되었습니다!`);
+                }).catch(() => {
+                    fallbackCopyText(shareUrl, projName);
+                });
+            } else {
+                fallbackCopyText(shareUrl, projName);
+            }
+        }
+
+        function fallbackCopyText(text, projName) {
+            const tempInput = document.createElement('input');
+            tempInput.value = text;
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempInput);
+            showToast(`🔗 [${projName}] 전용 공유 링크가 복사되었습니다!`);
+        }
 
         window.addEventListener('DOMContentLoaded', () => {
+            // URL 파라미터에서 ?share=... 확인
+            const urlParams = new URLSearchParams(window.location.search);
+            shareFolderId = urlParams.get('share');
+            if (shareFolderId) {
+                isShareMode = true;
+                currentProjectId = shareFolderId;
+
+                // 공유 뷰어 모드 UI 세팅: 사이드바 숨김, 읽기 전용 뱃지 표시, 수정/업로드/공유 버튼 숨김
+                const sidebar = document.querySelector('aside.sidebar');
+                if (sidebar) sidebar.classList.add('collapsed');
+
+                const btnSidebarToggle = document.getElementById('btnSidebarToggle');
+                if (btnSidebarToggle) btnSidebarToggle.style.display = 'none';
+
+                const shareBadge = document.getElementById('shareModeBadgeContainer');
+                if (shareBadge) shareBadge.style.display = 'block';
+
+                const btnAddUrl = document.getElementById('btnAddUrl');
+                if (btnAddUrl) btnAddUrl.style.display = 'none';
+
+                const btnUpload = document.getElementById('btnUpload');
+                if (btnUpload) btnUpload.style.display = 'none';
+
+                const btnTrash = document.getElementById('btnTrash');
+                if (btnTrash) btnTrash.style.display = 'none';
+
+                const btnShareFolder = document.getElementById('btnShareFolder');
+                if (btnShareFolder) btnShareFolder.style.display = 'none';
+            }
+
             initSlider();
-            setupPasteListener();
-            setupUndoListener();
+            if (!isShareMode) {
+                setupPasteListener();
+                setupUndoListener();
+            }
             initRealtimeSync(); // Firebase 실시간 동기화 시작
         });
 
@@ -987,7 +1076,7 @@
                     });
                 }
 
-                if (!projects.some(p => p.id === currentProjectId)) {
+                if (!isShareMode && !projects.some(p => p.id === currentProjectId)) {
                     currentProjectId = projects[0]?.id || 'proj-mobility';
                 }
                 renderProjects();
@@ -1011,16 +1100,18 @@
                 console.error("Firestore Items sync error:", error);
             });
 
-            // 로컬 UI 상태 복원
-            const savedSidebar = localStorage.getItem('moodboard_sidebar_collapsed');
-            if (savedSidebar === '1') {
-                isSidebarCollapsed = true;
-                const sb = document.querySelector('aside.sidebar');
-                if (sb) sb.classList.add('collapsed');
-            }
-            const savedCollapsed = localStorage.getItem('moodboard_collapsed_projects');
-            if (savedCollapsed) {
-                collapsedProjects = new Set(JSON.parse(savedCollapsed));
+            // 로컬 UI 상태 복원 (공유 모드가 아닐 때만)
+            if (!isShareMode) {
+                const savedSidebar = localStorage.getItem('moodboard_sidebar_collapsed');
+                if (savedSidebar === '1') {
+                    isSidebarCollapsed = true;
+                    const sb = document.querySelector('aside.sidebar');
+                    if (sb) sb.classList.add('collapsed');
+                }
+                const savedCollapsed = localStorage.getItem('moodboard_collapsed_projects');
+                if (savedCollapsed) {
+                    collapsedProjects = new Set(JSON.parse(savedCollapsed));
+                }
             }
         }
 
@@ -1193,6 +1284,9 @@
                     <div style="display: flex; align-items: center;">
                         <span class="proj-count">${totalCount}</span>
                         <div class="proj-hover-tools" onclick="event.stopPropagation()">
+                            <button class="tool-icon-btn" title="폴더 공유 링크 복사" onclick="copyFolderShareLink('${p.id}')">
+                                <i data-lucide="share-2" style="width: 12px; height: 12px; color: #2997ff;"></i>
+                            </button>
                             <button class="tool-icon-btn" title="하위 폴더 추가" onclick="promptAddSubProject('${p.id}')">
                                 <i data-lucide="plus" style="width: 12px; height: 12px;"></i>
                             </button>
@@ -1557,8 +1651,8 @@
                 card.className = `board-item ${isSelectionMode ? 'selectable' : ''} ${isSelected ? 'selected' : ''}`;
                 card.setAttribute('data-id', item.id);
                 
-                // 선택 모드가 아닐 때만 드래그 앤 드롭 허용
-                if (!isSelectionMode) {
+                // 선택 모드 또는 공유 모드가 아닐 때만 드래그 앤 드롭 허용
+                if (!isSelectionMode && !isShareMode) {
                     card.setAttribute('draggable', 'true');
 
                     card.addEventListener('dragstart', (e) => {
@@ -1632,15 +1726,19 @@
                         <img src="${item.src}" alt="Visual" loading="lazy">
                         ${!isSelectionMode ? `
                             <div class="card-actions" onclick="event.stopPropagation()">
-                                <button class="glass-icon-btn" title="${item.url ? 'URL 수정: ' + item.url : 'URL 추가'}" onclick="editItemUrl('${item.id}')">
-                                    <i data-lucide="${item.url ? 'link-2' : 'link'}" style="width: 13px; height: 13px; color: ${item.url ? '#2997ff' : '#fff'};"></i>
-                                </button>
+                                ${!isShareMode ? `
+                                    <button class="glass-icon-btn" title="${item.url ? 'URL 수정: ' + item.url : 'URL 추가'}" onclick="editItemUrl('${item.id}')">
+                                        <i data-lucide="${item.url ? 'link-2' : 'link'}" style="width: 13px; height: 13px; color: ${item.url ? '#2997ff' : '#fff'};"></i>
+                                    </button>
+                                ` : ''}
                                 <button class="glass-icon-btn" title="다운로드" onclick="downloadImage('${item.src}')">
                                     <i data-lucide="download" style="width: 13px; height: 13px;"></i>
                                 </button>
-                                <button class="glass-icon-btn danger" title="삭제" onclick="deleteItem('${item.id}')">
-                                    <i data-lucide="trash-2" style="width: 13px; height: 13px;"></i>
-                                </button>
+                                ${!isShareMode ? `
+                                    <button class="glass-icon-btn danger" title="삭제" onclick="deleteItem('${item.id}')">
+                                        <i data-lucide="trash-2" style="width: 13px; height: 13px;"></i>
+                                    </button>
+                                ` : ''}
                             </div>
                             ${hostName ? `
                                 <div class="card-url-tag" onclick="event.stopPropagation(); window.open('${item.url}', '_blank');" title="사이트로 이동: ${item.url}">
