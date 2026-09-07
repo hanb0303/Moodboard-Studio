@@ -544,9 +544,27 @@
             border-radius: 12px;
             overflow: hidden;
             border: 1px solid rgba(255, 255, 255, 0.06);
-            transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.25s ease, border-color 0.2s ease;
+            transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.25s ease, border-color 0.2s ease, opacity 0.2s ease;
             position: relative;
-            cursor: pointer;
+            cursor: grab;
+            user-select: none;
+        }
+
+        .board-item:active {
+            cursor: grabbing;
+        }
+
+        .board-item.is-dragging {
+            opacity: 0.25;
+            transform: scale(0.96);
+        }
+
+        .board-item.drag-over-top {
+            box-shadow: 0 -3px 0 0 #2997ff, 0 12px 32px rgba(0, 0, 0, 0.7);
+        }
+
+        .board-item.drag-over-bottom {
+            box-shadow: 0 3px 0 0 #2997ff, 0 12px 32px rgba(0, 0, 0, 0.7);
         }
 
         .board-item:hover {
@@ -1502,11 +1520,23 @@
             }
         }
 
+        let draggedItemId = null;
+
         function renderGrid() {
             const grid = document.getElementById('masonryGrid');
             const empty = document.getElementById('emptyState');
             if (!grid) return;
             grid.innerHTML = '';
+
+            // order 기준 정렬 (없으면 createdAt 기준)
+            allItems.sort((a, b) => {
+                if (a.order !== undefined && b.order !== undefined) {
+                    return a.order - b.order;
+                }
+                const timeA = a.createdAt?.seconds || 0;
+                const timeB = b.createdAt?.seconds || 0;
+                return timeB - timeA;
+            });
 
             const visibleProjectIds = getAllDescendantProjectIds(currentProjectId);
             const currentItems = allItems.filter(it => visibleProjectIds.includes(it.projectId));
@@ -1526,6 +1556,58 @@
                 const isSelected = selectedItemIds.has(item.id);
                 card.className = `board-item ${isSelectionMode ? 'selectable' : ''} ${isSelected ? 'selected' : ''}`;
                 card.setAttribute('data-id', item.id);
+                
+                // 선택 모드가 아닐 때만 드래그 앤 드롭 허용
+                if (!isSelectionMode) {
+                    card.setAttribute('draggable', 'true');
+
+                    card.addEventListener('dragstart', (e) => {
+                        draggedItemId = item.id;
+                        card.classList.add('is-dragging');
+                        e.dataTransfer.effectAllowed = 'move';
+                        e.dataTransfer.setData('text/plain', item.id);
+                    });
+
+                    card.addEventListener('dragend', () => {
+                        draggedItemId = null;
+                        document.querySelectorAll('.board-item').forEach(el => {
+                            el.classList.remove('is-dragging', 'drag-over-top', 'drag-over-bottom');
+                        });
+                    });
+
+                    card.addEventListener('dragover', (e) => {
+                        e.preventDefault();
+                        if (!draggedItemId || draggedItemId === item.id) return;
+                        e.dataTransfer.dropEffect = 'move';
+
+                        const rect = card.getBoundingClientRect();
+                        const midY = rect.top + rect.height / 2;
+                        if (e.clientY < midY) {
+                            card.classList.add('drag-over-top');
+                            card.classList.remove('drag-over-bottom');
+                        } else {
+                            card.classList.add('drag-over-bottom');
+                            card.classList.remove('drag-over-top');
+                        }
+                    });
+
+                    card.addEventListener('dragleave', () => {
+                        card.classList.remove('drag-over-top', 'drag-over-bottom');
+                    });
+
+                    card.addEventListener('drop', async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        card.classList.remove('drag-over-top', 'drag-over-bottom');
+
+                        if (!draggedItemId || draggedItemId === item.id) return;
+
+                        const rect = card.getBoundingClientRect();
+                        const isInsertBefore = e.clientY < (rect.top + rect.height / 2);
+
+                        await handleItemReorder(draggedItemId, item.id, isInsertBefore);
+                    });
+                }
 
                 card.onclick = () => {
                     if (isSelectionMode) {
@@ -1574,6 +1656,40 @@
             });
 
             lucide.createIcons();
+        }
+
+        // 이미지 드래그 앤 드롭 순서 변경 처리
+        async function handleItemReorder(sourceId, targetId, isInsertBefore) {
+            const sourceIndex = allItems.findIndex(it => it.id === sourceId);
+            const targetIndex = allItems.findIndex(it => it.id === targetId);
+            if (sourceIndex === -1 || targetIndex === -1) return;
+
+            const [movedItem] = allItems.splice(sourceIndex, 1);
+            
+            const newTargetIndex = allItems.findIndex(it => it.id === targetId);
+            const insertIndex = isInsertBefore ? newTargetIndex : newTargetIndex + 1;
+            allItems.splice(insertIndex, 0, movedItem);
+
+            // 전체 순서 order 부여
+            allItems.forEach((it, idx) => {
+                it.order = idx;
+            });
+
+            renderGrid();
+
+            // Firestore에 변경된 순서 저장
+            try {
+                const batch = db.batch();
+                allItems.forEach(it => {
+                    batch.set(db.collection('items').doc(it.id), {
+                        order: it.order
+                    }, { merge: true });
+                });
+                await batch.commit();
+                showToast("이미지 순서가 변경되었습니다.");
+            } catch (err) {
+                console.warn("Item reorder save error:", err);
+            }
         }
 
         async function deleteItem(id) {
