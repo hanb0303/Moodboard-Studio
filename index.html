@@ -1789,20 +1789,10 @@
                     } catch {}
                 }
 
-                // 개별 이미지 너비(크기) 적용 (기본 슬라이더 기준값 또는 저장된 개별 px/배율)
+                // 개별 이미지 너비(크기) 적용 (저장된 px 너비 또는 상단 슬라이더 기준값)
                 const baseGridSize = parseInt(document.getElementById('sizeSlider')?.value) || 280;
-                if (item.width) {
-                    if (typeof item.width === 'number') {
-                        if (item.width <= 300 && item.width >= 30) {
-                            // 비율(%)로 저장되었던 경우
-                            card.style.width = `${Math.round(baseGridSize * (item.width / 100))}px`;
-                        } else {
-                            // px로 저장된 경우
-                            card.style.width = `${item.width}px`;
-                        }
-                    } else {
-                        card.style.width = item.width;
-                    }
+                if (item.width && typeof item.width === 'number') {
+                    card.style.width = `${item.width}px`;
                 } else {
                     card.style.width = `${baseGridSize}px`;
                 }
