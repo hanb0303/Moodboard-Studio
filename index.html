@@ -538,7 +538,7 @@
             transform: rotate(45deg) translate(-1px, -1px);
         }
 
-        /* 무드보드 가변 플렉스 그리드 (Pinterest/Justified Reflow 스타일) */
+        /* Pinterest 스타일 버티컬 메이슨리 그리드 (빈틈없이 자동 밀착) */
         .content-scroll-area {
             flex: 1;
             overflow-y: auto;
@@ -546,14 +546,14 @@
         }
 
         .masonry-grid {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 16px;
+            column-width: 280px;
+            column-gap: 16px;
             width: 100%;
-            align-content: flex-start;
         }
 
         .board-item {
+            break-inside: avoid;
+            margin-bottom: 16px;
             position: relative;
             background: var(--bg-card);
             border-radius: 12px;
@@ -562,9 +562,12 @@
             transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
             cursor: grab;
             user-select: none;
-            flex-grow: 0;
-            flex-shrink: 0;
-            height: fit-content;
+            width: 100%;
+            display: block;
+        }
+
+        .board-item.span-2 {
+            column-span: all;
         }
 
         .board-item:active {
@@ -585,11 +588,11 @@
         }
 
         .board-item.drag-over-left {
-            box-shadow: -3px 0 0 0 #2997ff, 0 12px 32px rgba(0, 0, 0, 0.7);
+            box-shadow: 0 -3px 0 0 #2997ff, 0 12px 32px rgba(0, 0, 0, 0.7);
         }
 
         .board-item.drag-over-right {
-            box-shadow: 3px 0 0 0 #2997ff, 0 12px 32px rgba(0, 0, 0, 0.7);
+            box-shadow: 0 3px 0 0 #2997ff, 0 12px 32px rgba(0, 0, 0, 0.7);
         }
 
         .board-item:hover {
@@ -1801,12 +1804,11 @@
                     } catch {}
                 }
 
-                // 개별 이미지 너비(크기) 적용 (저장된 px 너비 또는 상단 슬라이더 기준값)
-                const baseGridSize = parseInt(document.getElementById('sizeSlider')?.value) || 280;
-                if (item.width && typeof item.width === 'number') {
-                    card.style.width = `${item.width}px`;
+                // 개별 이미지 너비(크기) 적용 (기본 1컬럼, 와이드 2컬럼 span-2 지원)
+                if (item.span === 2 || (item.width && item.width >= 480)) {
+                    card.classList.add('span-2');
                 } else {
-                    card.style.width = `${baseGridSize}px`;
+                    card.classList.remove('span-2');
                 }
 
                 card.innerHTML = `
@@ -2230,14 +2232,10 @@
         }
 
         function handleSizeChange(val) {
-            const cards = document.querySelectorAll('.board-item');
-            cards.forEach(card => {
-                const itemId = card.getAttribute('data-id');
-                const item = allItems.find(it => it.id === itemId);
-                if (!item || !item.width) {
-                    card.style.width = `${val}px`;
-                }
-            });
+            const grid = document.getElementById('masonryGrid');
+            if (grid) {
+                grid.style.columnWidth = `${val}px`;
+            }
             try {
                 localStorage.setItem('moodboard_apple_size', val);
             } catch {}
