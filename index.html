@@ -11,6 +11,10 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 
+    <!-- Packery & imagesLoaded (자유 크기 조절 + 자석 밀착 테트리스 레이아웃 엔진) -->
+    <script src="https://unpkg.com/imagesloaded@5/imagesloaded.pkgd.min.js"></script>
+    <script src="https://unpkg.com/packery@2/dist/packery.pkgd.min.js"></script>
+
     <style>
         @import url("https://cdn.jsdelivr.net/gh/wanteddev/wanted-sans@v1.0.3/packages/wanted-sans/fonts/webfonts/variable/split/WantedSansVariable.min.css");
 
@@ -278,6 +282,44 @@
             color: #ff453a;
         }
 
+        .sidebar-footer {
+            padding: 10px 12px;
+            border-top: 1px solid var(--border-subtle);
+            min-width: 260px;
+        }
+
+        .sidebar-trash-btn {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 10px;
+            border-radius: 8px;
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .sidebar-trash-btn:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-primary);
+        }
+
+        .sidebar-trash-btn.active {
+            background: rgba(255, 69, 58, 0.15);
+            color: #ff453a;
+            font-weight: 600;
+        }
+
+        .trash-badge {
+            font-size: 11px;
+            color: var(--text-tertiary);
+            padding: 1px 6px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.06);
+        }
+
         /* 메인 뷰포트 */
         .main-wrapper {
             flex: 1;
@@ -538,7 +580,7 @@
             transform: rotate(45deg) translate(-1px, -1px);
         }
 
-        /* Bento Grid 메이슨리 (빈틈없이 테트리스처럼 꽉 채워지는 가변 그리드) */
+        /* Packery 자석 밀착 테트리스 그리드 컨테이너 */
         .content-scroll-area {
             flex: 1;
             overflow-y: auto;
@@ -546,33 +588,22 @@
         }
 
         .masonry-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(var(--grid-cell-size, 260px), 1fr));
-            grid-auto-rows: 20px;
-            grid-auto-flow: dense;
-            gap: 16px;
+            position: relative;
             width: 100%;
+            margin: 0 auto;
+            transition: height 0.2s ease;
         }
 
         .board-item {
-            position: relative;
+            position: absolute;
             background: var(--bg-card);
             border-radius: 12px;
             overflow: hidden;
             border: 1px solid rgba(255, 255, 255, 0.06);
-            transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
+            transition: box-shadow 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
             cursor: grab;
             user-select: none;
-            grid-column: span 1;
-            /* JS에서 이미지 높이에 따라 grid-row: span N 자동 계산 */
-        }
-
-        .board-item.span-2 {
-            grid-column: span 2;
-        }
-
-        .board-item.span-3 {
-            grid-column: span 3;
+            margin-bottom: 16px;
         }
 
         .board-item:active {
@@ -945,6 +976,16 @@
         </div>
 
         <div class="project-list" id="projectList"></div>
+
+        <div class="sidebar-footer">
+            <div class="sidebar-trash-btn" id="sidebarTrashBtn" onclick="selectTrashView()">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
+                    <span>휴지통 (7일 보관)</span>
+                </div>
+                <span class="trash-badge" id="trashCountBadge">0</span>
+            </div>
+        </div>
     </aside>
 
     <!-- 메인 뷰포트 -->
@@ -998,6 +1039,14 @@
                         <span>삭제</span>
                     </button>
                     <button class="apple-btn" onclick="toggleSelectMode(false)">완료</button>
+                </div>
+
+                <!-- 휴지통 전용 컨트롤 -->
+                <div id="trashControls" style="display: none; align-items: center; gap: 10px;">
+                    <button class="apple-btn danger" onclick="emptyTrashCan()" style="background: rgba(255, 69, 58, 0.15);">
+                        <i data-lucide="trash" style="width: 13px; height: 13px;"></i>
+                        <span>휴지통 비우기</span>
+                    </button>
                 </div>
 
                 <input type="file" id="fileInput" accept="image/*" multiple style="display: none;" onchange="handleFileUpload(event)">
@@ -1071,6 +1120,7 @@
         let isSidebarCollapsed = false;
         let isShareMode = false;
         let shareFolderId = null;
+        let pckry = null;
 
         // 폴더 공유 링크 복사 함수
         function copyFolderShareLink(projectId) {
@@ -1176,6 +1226,8 @@
                 snapshot.forEach(doc => {
                     allItems.push({ id: doc.id, ...doc.data() });
                 });
+                // 7일 지난 휴지통 항목 자동 정리
+                cleanUpOldTrashItems();
                 renderProjects();
                 renderSubfolderTabs();
                 renderGrid();
@@ -1392,9 +1444,26 @@
 
             rootProjects.forEach(rp => renderProjectTree(rp, 0));
 
-            const currentProj = projects.find(p => p.id === currentProjectId) || projects[0];
+            // 휴지통 뱃지 카운트 갱신 및 사이드바 버튼 상태
+            const trashItemsCount = allItems.filter(it => it.projectId === 'trash').length;
+            const trashBadge = document.getElementById('trashCountBadge');
+            if (trashBadge) trashBadge.innerText = `${trashItemsCount}`;
+
+            const trashBtn = document.getElementById('sidebarTrashBtn');
+            if (trashBtn) {
+                trashBtn.classList.toggle('active', currentProjectId === 'trash');
+            }
+
+            const isTrashView = currentProjectId === 'trash';
             const titleEl = document.getElementById('currentProjName');
-            if (titleEl) titleEl.innerText = currentProj ? currentProj.name : '';
+            if (titleEl) {
+                if (isTrashView) {
+                    titleEl.innerText = '휴지통';
+                } else {
+                    const currentProj = projects.find(p => p.id === currentProjectId) || projects[0];
+                    titleEl.innerText = currentProj ? currentProj.name : '';
+                }
+            }
 
             lucide.createIcons();
         }
@@ -1464,6 +1533,25 @@
 
         function selectProject(id) {
             currentProjectId = id;
+            if (isSelectionMode) toggleSelectMode(false);
+            const normalCtrl = document.getElementById('normalControls');
+            const trashCtrl = document.getElementById('trashControls');
+            if (normalCtrl) normalCtrl.style.display = 'flex';
+            if (trashCtrl) trashCtrl.style.display = 'none';
+
+            renderProjects();
+            renderSubfolderTabs();
+            renderGrid();
+        }
+
+        function selectTrashView() {
+            currentProjectId = 'trash';
+            if (isSelectionMode) toggleSelectMode(false);
+            const normalCtrl = document.getElementById('normalControls');
+            const trashCtrl = document.getElementById('trashControls');
+            if (normalCtrl) normalCtrl.style.display = 'none';
+            if (trashCtrl) trashCtrl.style.display = 'flex';
+
             renderProjects();
             renderSubfolderTabs();
             renderGrid();
@@ -1700,6 +1788,15 @@
 
         let draggedItemId = null;
 
+        function getBaseGridSize() {
+            try {
+                const saved = localStorage.getItem('moodboard_apple_size');
+                if (saved) return parseInt(saved, 10);
+            } catch {}
+            const slider = document.getElementById('sizeSlider');
+            return slider ? parseInt(slider.value, 10) : 280;
+        }
+
         function renderGrid() {
             const grid = document.getElementById('masonryGrid');
             const empty = document.getElementById('emptyState');
@@ -1716,18 +1813,30 @@
                 return timeB - timeA;
             });
 
-            const visibleProjectIds = getAllDescendantProjectIds(currentProjectId);
-            const currentItems = allItems.filter(it => visibleProjectIds.includes(it.projectId));
+            const isTrashView = currentProjectId === 'trash';
+            let currentItems;
+            if (isTrashView) {
+                currentItems = allItems.filter(it => it.projectId === 'trash');
+            } else {
+                const visibleProjectIds = getAllDescendantProjectIds(currentProjectId);
+                currentItems = allItems.filter(it => it.projectId !== 'trash' && visibleProjectIds.includes(it.projectId));
+            }
             
             const countEl = document.getElementById('imageCount');
             if (countEl) countEl.innerText = `${currentItems.length}`;
 
             if (currentItems.length === 0) {
                 if (empty) empty.style.display = 'flex';
+                if (pckry) {
+                    pckry.destroy();
+                    pckry = null;
+                }
                 return;
             }
 
             if (empty) empty.style.display = 'none';
+
+            const baseWidth = getBaseGridSize();
 
             currentItems.forEach(item => {
                 const card = document.createElement('div');
@@ -1735,8 +1844,12 @@
                 card.className = `board-item ${isSelectionMode ? 'selectable' : ''} ${isSelected ? 'selected' : ''}`;
                 card.setAttribute('data-id', item.id);
                 
-                // 선택 모드 또는 공유 모드가 아닐 때만 드래그 앤 드롭 허용
-                if (!isSelectionMode && !isShareMode) {
+                // 마우스로 조절한 픽셀 크기 적용 (기본값은 상단 슬라이더 크기)
+                const cardWidth = item.width || baseWidth;
+                card.style.width = cardWidth + 'px';
+                
+                // 선택 모드 또는 공유 모드가 아닐 때만 드래그 앤 드롭 정렬 허용
+                if (!isSelectionMode && !isShareMode && !isTrashView) {
                     card.setAttribute('draggable', 'true');
 
                     card.addEventListener('dragstart', (e) => {
@@ -1760,11 +1873,9 @@
 
                         const rect = card.getBoundingClientRect();
                         const relX = (e.clientX - rect.left) / rect.width;
-                        const relY = (e.clientY - rect.top) / rect.height;
 
                         card.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-over-left', 'drag-over-right');
 
-                        // 좌우 및 상하 위치 판단: 가로 배치가 우선되는 그리드 특성에 맞춰 좌/우/상/하 가이드라인 표시
                         if (relX < 0.5) {
                             card.classList.add('drag-over-left');
                         } else {
@@ -1809,36 +1920,34 @@
                     } catch {}
                 }
 
-                // 개별 이미지 너비(크기) 적용 (기본 1컬럼, 와이드 2컬럼 span-2, 대형 3컬럼 span-3 지원)
-                if (item.span === 3) {
-                    card.classList.add('span-3');
-                    card.classList.remove('span-2');
-                } else if (item.span === 2 || (item.width && item.width >= 420)) {
-                    card.classList.add('span-2');
-                    card.classList.remove('span-3');
-                } else {
-                    card.classList.remove('span-2', 'span-3');
-                }
-
                 card.innerHTML = `
                     <div class="select-checkbox"></div>
                     <div class="img-wrapper ${isSquareItem ? 'is-square' : ''}">
-                        <img src="${item.src}" alt="Visual" loading="lazy" onload="resizeGridItem(this.closest('.board-item'))">
+                        <img src="${item.src}" alt="Visual" loading="lazy">
                         ${!isSelectionMode ? `
                             <div class="card-actions" onclick="event.stopPropagation()">
-                                ${!isShareMode ? `
-                                    <button class="glass-icon-btn" title="${item.url ? 'URL 수정: ' + item.url : 'URL 추가'}" onclick="editItemUrl('${item.id}')">
-                                        <i data-lucide="${item.url ? 'link-2' : 'link'}" style="width: 13px; height: 13px; color: ${item.url ? '#2997ff' : '#fff'};"></i>
+                                ${isTrashView ? `
+                                    <button class="glass-icon-btn" title="원래 폴더로 복구" onclick="restoreItem('${item.id}')" style="color: #30d158;">
+                                        <i data-lucide="rotate-ccw" style="width: 13px; height: 13px;"></i>
                                     </button>
-                                ` : ''}
-                                <button class="glass-icon-btn" title="다운로드" onclick="downloadImage('${item.src}')">
-                                    <i data-lucide="download" style="width: 13px; height: 13px;"></i>
-                                </button>
-                                ${!isShareMode ? `
-                                    <button class="glass-icon-btn danger" title="삭제" onclick="deleteItem('${item.id}')">
+                                    <button class="glass-icon-btn danger" title="영구 삭제 (복구 불가)" onclick="purgeItem('${item.id}')">
                                         <i data-lucide="trash-2" style="width: 13px; height: 13px;"></i>
                                     </button>
-                                ` : ''}
+                                ` : `
+                                    ${!isShareMode ? `
+                                        <button class="glass-icon-btn" title="${item.url ? 'URL 수정: ' + item.url : 'URL 추가'}" onclick="editItemUrl('${item.id}')">
+                                            <i data-lucide="${item.url ? 'link-2' : 'link'}" style="width: 13px; height: 13px; color: ${item.url ? '#2997ff' : '#fff'};"></i>
+                                        </button>
+                                    ` : ''}
+                                    <button class="glass-icon-btn" title="다운로드" onclick="downloadImage('${item.src}')">
+                                        <i data-lucide="download" style="width: 13px; height: 13px;"></i>
+                                    </button>
+                                    ${!isShareMode ? `
+                                        <button class="glass-icon-btn danger" title="휴지통으로 이동" onclick="deleteItem('${item.id}')">
+                                            <i data-lucide="trash-2" style="width: 13px; height: 13px;"></i>
+                                        </button>
+                                    ` : ''}
+                                `}
                             </div>
                             ${hostName ? `
                                 <div class="card-url-tag" onclick="event.stopPropagation(); window.open('${item.url}', '_blank');" title="사이트로 이동: ${item.url}">
@@ -1846,8 +1955,8 @@
                                     <span>${hostName}</span>
                                 </div>
                             ` : ''}
-                            ${!isShareMode ? `
-                                <div class="resize-handle" title="모서리를 드래그하여 크기 변경 (1칸 / 2칸 와이드)" onmousedown="startCardResize(event, '${item.id}')" onclick="event.stopPropagation()"></div>
+                            ${!isShareMode && !isTrashView ? `
+                                <div class="resize-handle" title="모서리를 드래그하여 원하는 크기로 자유롭게 조절 (주변 이미지가 자석처럼 밀착)" onmousedown="startCardResize(event, '${item.id}')" onclick="event.stopPropagation()"></div>
                             ` : ''}
                         ` : ''}
                     </div>
@@ -1857,33 +1966,26 @@
             });
 
             lucide.createIcons();
-            setTimeout(resizeAllGridItems, 50);
+
+            // Packery 테트리스 자석 밀착 엔진 초기화 및 레이아웃
+            if (pckry) {
+                pckry.destroy();
+            }
+            pckry = new Packery(grid, {
+                itemSelector: '.board-item',
+                gutter: 16,
+                percentPosition: false,
+                transitionDuration: '0.2s'
+            });
+
+            if (window.imagesLoaded) {
+                imagesLoaded(grid).on('progress', () => {
+                    if (pckry) pckry.layout();
+                });
+            }
         }
 
-        // --- Bento Grid 높이 자동 맞춤 계산 (빈틈없이 테트리스 정렬) ---
-        function resizeGridItem(card) {
-            if (!card) return;
-            const grid = document.getElementById('masonryGrid');
-            if (!grid) return;
-            const rowHeight = 20; // grid-auto-rows: 20px
-            const rowGap = 16;    // gap: 16px
-            const imgWrapper = card.querySelector('.img-wrapper');
-            if (!imgWrapper) return;
-            const contentHeight = imgWrapper.getBoundingClientRect().height;
-            const rowSpan = Math.ceil((contentHeight + rowGap) / (rowHeight + rowGap));
-            card.style.gridRowEnd = `span ${rowSpan}`;
-        }
-
-        function resizeAllGridItems() {
-            const allCards = document.querySelectorAll('.board-item');
-            allCards.forEach(card => resizeGridItem(card));
-        }
-
-        window.addEventListener('resize', () => {
-            resizeAllGridItems();
-        });
-
-        // --- 개별 이미지 크기 조절 (1칸 ↔ 2칸 와이드 스냅 드래그) ---
+        // --- Packery 기반 픽셀 단위 자유 마우스 드래그 크기 조절 (자석 테트리스 밀착) ---
         let activeResizingItemId = null;
         let isResizingJustFinished = false;
 
@@ -1904,8 +2006,8 @@
             card.removeAttribute('draggable');
 
             const startX = e.clientX;
-            const startSpan = card.classList.contains('span-3') ? 3 : (card.classList.contains('span-2') ? 2 : 1);
-            let currentSpan = startSpan;
+            const startWidth = card.getBoundingClientRect().width;
+            let currentWidth = Math.round(startWidth);
 
             // 툴팁 생성
             let tooltip = card.querySelector('.resize-tooltip');
@@ -1914,30 +2016,20 @@
                 tooltip.className = 'resize-tooltip';
                 card.appendChild(tooltip);
             }
-            tooltip.innerText = `${currentSpan}칸 (${currentSpan === 1 ? '기본' : (currentSpan === 2 ? '와이드' : '대형')})`;
+            tooltip.innerText = `${currentWidth}px`;
 
             function onMouseMove(moveEvent) {
                 moveEvent.preventDefault();
                 const deltaX = moveEvent.clientX - startX;
+                currentWidth = Math.max(160, Math.min(900, Math.round(startWidth + deltaX)));
                 
-                // 마우스 드래그 거리에 따라 1칸 ↔ 2칸 ↔ 3칸으로 스냅 전환
-                if (deltaX > 140) {
-                    currentSpan = 2;
-                } else if (deltaX < -100) {
-                    currentSpan = 1;
-                } else {
-                    currentSpan = startSpan;
-                }
+                card.style.width = currentWidth + 'px';
+                tooltip.innerText = `${currentWidth}px`;
 
-                if (currentSpan === 2) {
-                    card.classList.add('span-2');
-                    card.classList.remove('span-3');
-                } else {
-                    card.classList.remove('span-2', 'span-3');
+                // 실시간으로 주변 이미지들이 빈자리를 찾아 자석처럼 달라붙도록 Packery 재배치
+                if (pckry) {
+                    pckry.layout();
                 }
-
-                tooltip.innerText = `${currentSpan}칸 (${currentSpan === 1 ? '기본' : '와이드 2배'})`;
-                resizeGridItem(card);
             }
 
             async function onMouseUp(upEvent) {
@@ -1957,21 +2049,21 @@
                 }
                 activeResizingItemId = null;
 
-                // 드래그 종료 후 클릭 방지
+                // 드래그 직후 클릭 라이트박스 오픈 방지
                 isResizingJustFinished = true;
                 setTimeout(() => {
                     isResizingJustFinished = false;
                 }, 250);
 
-                // 데이터 갱신 및 Firestore 저장
-                item.span = currentSpan;
-                resizeAllGridItems();
+                // 로컬 및 Firestore에 변경된 너비 저장
+                item.width = currentWidth;
+                if (pckry) pckry.layout();
 
                 try {
                     await db.collection('items').doc(itemId).update({
-                        span: currentSpan
+                        width: currentWidth
                     });
-                    showToast(`크기가 ${currentSpan === 2 ? '와이드(2칸)' : '기본(1칸)'}으로 변경되었습니다.`);
+                    showToast(`${currentWidth}px 크기로 저장되었습니다.`);
                 } catch (err) {
                     console.error("Resize save error:", err);
                 }
@@ -2015,13 +2107,98 @@
             }
         }
 
+        // 휴지통으로 이동 (소프트 딜리트 - 7일 보관)
         async function deleteItem(id) {
             const itemToDelete = allItems.find(it => it.id === id);
-            if (itemToDelete) {
-                undoStack.push({ type: 'delete', item: itemToDelete });
+            if (!itemToDelete) return;
+
+            try {
+                await db.collection('items').doc(id).update({
+                    deletedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    previousProjectId: itemToDelete.projectId,
+                    projectId: 'trash'
+                });
+                showToast("🗑️ 휴지통으로 이동되었습니다 (7일 보관)");
+            } catch (err) {
+                console.error("Delete to trash error:", err);
             }
-            await db.collection('items').doc(id).delete();
-            showToast("삭제됨");
+        }
+
+        // 휴지통에서 원래 폴더로 복구
+        async function restoreItem(id) {
+            const item = allItems.find(it => it.id === id);
+            if (!item) return;
+
+            const targetProjectId = item.previousProjectId && projects.some(p => p.id === item.previousProjectId) 
+                ? item.previousProjectId 
+                : (projects[0]?.id || 'proj-mobility');
+
+            try {
+                await db.collection('items').doc(id).update({
+                    deletedAt: firebase.firestore.FieldValue.delete(),
+                    previousProjectId: firebase.firestore.FieldValue.delete(),
+                    projectId: targetProjectId
+                });
+                showToast("↩️ 원래 폴더로 복구되었습니다.");
+            } catch (err) {
+                console.error("Restore error:", err);
+            }
+        }
+
+        // 휴지통에서 영구 삭제 (완전 삭제)
+        async function purgeItem(id) {
+            if (!confirm("이 이미지를 영구적으로 삭제하시겠습니까? 복구할 수 없습니다.")) return;
+            try {
+                await db.collection('items').doc(id).delete();
+                showToast("영구 삭제되었습니다.");
+            } catch (err) {
+                console.error("Purge error:", err);
+            }
+        }
+
+        // 휴지통 전체 비우기
+        async function emptyTrashCan() {
+            const trashItems = allItems.filter(it => it.projectId === 'trash');
+            if (trashItems.length === 0) {
+                showToast("휴지통이 이미 비어 있습니다.");
+                return;
+            }
+
+            if (!confirm(`휴지통의 이미지 ${trashItems.length}개를 모두 영구 삭제하시겠습니까?`)) return;
+
+            const batch = db.batch();
+            trashItems.forEach(it => {
+                batch.delete(db.collection('items').doc(it.id));
+            });
+
+            await batch.commit();
+            showToast("휴지통을 모두 비웠습니다.");
+        }
+
+        // 7일 지난 휴지통 항목 자동 영구 삭제 (1주일 보관 후 자동 폐기)
+        async function cleanUpOldTrashItems() {
+            const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+            const now = Date.now();
+            const trashItems = allItems.filter(it => it.projectId === 'trash');
+
+            const expiredItems = trashItems.filter(it => {
+                if (!it.deletedAt) return false;
+                const deleteTime = it.deletedAt.seconds ? it.deletedAt.seconds * 1000 : new Date(it.deletedAt).getTime();
+                return (now - deleteTime) > SEVEN_DAYS_MS;
+            });
+
+            if (expiredItems.length > 0) {
+                const batch = db.batch();
+                expiredItems.forEach(it => {
+                    batch.delete(db.collection('items').doc(it.id));
+                });
+                try {
+                    await batch.commit();
+                    console.log(`[휴지통] 7일 경과 항목 ${expiredItems.length}개 자동 정리 완료`);
+                } catch (err) {
+                    console.warn("Auto cleanup trash error:", err);
+                }
+            }
         }
 
         function toggleSelectMode(enable) {
@@ -2060,7 +2237,8 @@
         }
 
         function toggleSelectAll() {
-            const visibleProjectIds = getAllDescendantProjectIds(currentProjectId);
+            const isTrashView = currentProjectId === 'trash';
+            const visibleProjectIds = isTrashView ? ['trash'] : getAllDescendantProjectIds(currentProjectId);
             const currentItems = allItems.filter(it => visibleProjectIds.includes(it.projectId));
 
             if (selectedItemIds.size === currentItems.length) {
@@ -2087,16 +2265,25 @@
 
             const count = selectedItemIds.size;
             const batch = db.batch();
+            const isTrashView = currentProjectId === 'trash';
+
             selectedItemIds.forEach(id => {
-                const item = allItems.find(it => it.id === id);
-                if (item) undoStack.push({ type: 'delete', item });
-                batch.delete(db.collection('items').doc(id));
+                if (isTrashView) {
+                    batch.delete(db.collection('items').doc(id));
+                } else {
+                    const item = allItems.find(it => it.id === id);
+                    batch.update(db.collection('items').doc(id), {
+                        deletedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                        previousProjectId: item?.projectId || currentProjectId,
+                        projectId: 'trash'
+                    });
+                }
             });
 
             await batch.commit();
             selectedItemIds.clear();
             toggleSelectMode(false);
-            showToast(`${count}개 이미지가 삭제되었습니다.`);
+            showToast(isTrashView ? `${count}개 이미지가 영구 삭제되었습니다.` : `${count}개 이미지가 휴지통으로 이동되었습니다.`);
         }
 
         function setupUndoListener() {
@@ -2278,14 +2465,24 @@
         }
 
         function handleSizeChange(val) {
-            const grid = document.getElementById('masonryGrid');
-            if (grid) {
-                grid.style.setProperty('--grid-cell-size', `${val}px`);
-            }
+            const numVal = parseInt(val, 10);
             try {
                 localStorage.setItem('moodboard_apple_size', val);
             } catch {}
-            resizeAllGridItems();
+
+            // 개별 커스텀 너비가 없는 카드들의 기본 너비 일괄 적용
+            const cards = document.querySelectorAll('.board-item');
+            cards.forEach(card => {
+                const id = card.getAttribute('data-id');
+                const item = allItems.find(it => it.id === id);
+                if (!item || !item.width) {
+                    card.style.width = numVal + 'px';
+                }
+            });
+
+            if (pckry) {
+                pckry.layout();
+            }
         }
 
         function initSlider() {
