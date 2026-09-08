@@ -1771,7 +1771,8 @@
                     });
                 }
 
-                card.onclick = () => {
+                card.onclick = (e) => {
+                    if (isResizingJustFinished) return;
                     if (isSelectionMode) {
                         toggleItemSelection(item.id);
                     } else {
@@ -1833,7 +1834,7 @@
                                 </div>
                             ` : ''}
                             ${!isShareMode ? `
-                                <div class="resize-handle" title="모서리를 드래그하여 크기 조절 (더블클릭: 기본 크기로 복원)" onmousedown="startCardResize(event, '${item.id}')" ondblclick="resetCardSize(event, '${item.id}')" onclick="event.stopPropagation()"></div>
+                                <div class="resize-handle" title="모서리를 드래그하여 크기 조절" onmousedown="startCardResize(event, '${item.id}')" onclick="event.stopPropagation()"></div>
                             ` : ''}
                         ` : ''}
                     </div>
@@ -1847,6 +1848,7 @@
 
         // --- 개별 이미지 크기 조절 (마우스 드래그) ---
         let activeResizingItemId = null;
+        let isResizingJustFinished = false;
 
         function startCardResize(e, itemId) {
             e.preventDefault();
@@ -1886,15 +1888,25 @@
                 tooltip.innerText = `${newWidthPx}px`;
             }
 
-            async function onMouseUp() {
+            async function onMouseUp(upEvent) {
+                if (upEvent) {
+                    upEvent.preventDefault();
+                    upEvent.stopPropagation();
+                }
                 window.removeEventListener('mousemove', onMouseMove);
-                window.removeEventListener('mouseup', onMouseUp);
+                window.removeEventListener('mouseup', onMouseUp, true);
 
                 card.classList.remove('is-resizing');
                 if (tooltip && tooltip.parentNode) {
                     tooltip.parentNode.removeChild(tooltip);
                 }
                 activeResizingItemId = null;
+
+                // 드래그 종료 후 카드 클릭(라이트박스 열림 등) 방지
+                isResizingJustFinished = true;
+                setTimeout(() => {
+                    isResizingJustFinished = false;
+                }, 200);
 
                 // 데이터 갱신 및 Firestore 저장
                 item.width = finalWidthPx;
@@ -1909,32 +1921,7 @@
             }
 
             window.addEventListener('mousemove', onMouseMove);
-            window.addEventListener('mouseup', onMouseUp);
-        }
-
-        // 크기 원래대로 복원 (더블클릭 시 기본 슬라이더 크기로 리셋)
-        async function resetCardSize(e, itemId) {
-            e.preventDefault();
-            e.stopPropagation();
-
-            const item = allItems.find(it => it.id === itemId);
-            if (!item) return;
-
-            delete item.width;
-            const baseGridSize = parseInt(document.getElementById('sizeSlider')?.value) || 280;
-            const card = document.querySelector(`.board-item[data-id="${itemId}"]`);
-            if (card) {
-                card.style.width = `${baseGridSize}px`;
-            }
-
-            try {
-                await db.collection('items').doc(itemId).update({
-                    width: firebase.firestore.FieldValue.delete()
-                });
-                showToast("크기가 기본 크기로 복원되었습니다.");
-            } catch (err) {
-                console.error("Reset size error:", err);
-            }
+            window.addEventListener('mouseup', onMouseUp, true);
         }
 
         // 이미지 드래그 앤 드롭 순서 변경 처리
