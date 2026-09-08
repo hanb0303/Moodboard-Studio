@@ -538,7 +538,7 @@
             transform: rotate(45deg) translate(-1px, -1px);
         }
 
-        /* 무드보드 그리드 */
+        /* 무드보드 가변 플렉스 그리드 (Pinterest/Justified Reflow 스타일) */
         .content-scroll-area {
             flex: 1;
             overflow-y: auto;
@@ -546,23 +546,25 @@
         }
 
         .masonry-grid {
-            column-width: 280px;
-            column-gap: 16px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
             width: 100%;
-            transition: column-width 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            align-content: flex-start;
         }
 
         .board-item {
-            break-inside: avoid;
-            margin-bottom: 16px;
+            position: relative;
             background: var(--bg-card);
             border-radius: 12px;
             overflow: hidden;
             border: 1px solid rgba(255, 255, 255, 0.06);
-            transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.25s ease, border-color 0.2s ease, opacity 0.2s ease;
-            position: relative;
+            transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
             cursor: grab;
             user-select: none;
+            flex-grow: 0;
+            flex-shrink: 0;
+            height: fit-content;
         }
 
         .board-item:active {
@@ -1786,11 +1788,22 @@
                     } catch {}
                 }
 
-                // 개별 이미지 너비(크기) 적용 (비율 유지)
+                // 개별 이미지 너비(크기) 적용 (기본 슬라이더 기준값 또는 저장된 개별 px/배율)
+                const baseGridSize = parseInt(document.getElementById('sizeSlider')?.value) || 280;
                 if (item.width) {
-                    card.style.width = typeof item.width === 'number' ? `${item.width}%` : item.width;
+                    if (typeof item.width === 'number') {
+                        if (item.width <= 300 && item.width >= 30) {
+                            // 비율(%)로 저장되었던 경우
+                            card.style.width = `${Math.round(baseGridSize * (item.width / 100))}px`;
+                        } else {
+                            // px로 저장된 경우
+                            card.style.width = `${item.width}px`;
+                        }
+                    } else {
+                        card.style.width = item.width;
+                    }
                 } else {
-                    card.style.width = '100%';
+                    card.style.width = `${baseGridSize}px`;
                 }
 
                 card.innerHTML = `
@@ -1820,7 +1833,7 @@
                                 </div>
                             ` : ''}
                             ${!isShareMode ? `
-                                <div class="resize-handle" title="모서리를 드래그하여 크기 조절 (더블클릭: 원래 크기)" onmousedown="startCardResize(event, '${item.id}')" ondblclick="resetCardSize(event, '${item.id}')" onclick="event.stopPropagation()"></div>
+                                <div class="resize-handle" title="모서리를 드래그하여 크기 조절 (더블클릭: 기본 크기로 복원)" onmousedown="startCardResize(event, '${item.id}')" ondblclick="resetCardSize(event, '${item.id}')" onclick="event.stopPropagation()"></div>
                             ` : ''}
                         ` : ''}
                     </div>
@@ -1848,11 +1861,7 @@
             activeResizingItemId = itemId;
             card.classList.add('is-resizing');
 
-            // 카드 부모(또는 컬럼 기준)의 너비 측정
-            // masonry-grid 내에서 card의 offsetParent 또는 column 폭
-            const grid = document.getElementById('masonryGrid');
-            const colWidth = parseFloat(getComputedStyle(grid).columnWidth) || 280;
-
+            const baseGridSize = parseInt(document.getElementById('sizeSlider')?.value) || 280;
             const startX = e.clientX;
             const startWidthPx = card.offsetWidth;
 
@@ -1863,22 +1872,18 @@
                 tooltip.className = 'resize-tooltip';
                 card.appendChild(tooltip);
             }
-            const initialPercent = item.width ? (typeof item.width === 'number' ? item.width : parseInt(item.width)) : Math.round((startWidthPx / colWidth) * 100);
-            tooltip.innerText = `${Math.min(100, Math.max(30, initialPercent))}%`;
+            tooltip.innerText = `${startWidthPx}px`;
 
-            let currentWidthPercent = initialPercent;
+            let finalWidthPx = startWidthPx;
 
             function onMouseMove(moveEvent) {
                 const deltaX = moveEvent.clientX - startX;
-                const newWidthPx = startWidthPx + deltaX;
+                // 최소 100px에서 최대 900px까지 자유롭게 리사이즈
+                const newWidthPx = Math.max(100, Math.min(900, Math.round(startWidthPx + deltaX)));
                 
-                // 30% ~ 100% 범위로 계산 (컬럼 폭 대비)
-                let pct = Math.round((newWidthPx / colWidth) * 100);
-                pct = Math.max(30, Math.min(100, pct));
-                
-                currentWidthPercent = pct;
-                card.style.width = `${pct}%`;
-                tooltip.innerText = `${pct}%`;
+                finalWidthPx = newWidthPx;
+                card.style.width = `${newWidthPx}px`;
+                tooltip.innerText = `${newWidthPx}px`;
             }
 
             async function onMouseUp() {
@@ -1892,12 +1897,12 @@
                 activeResizingItemId = null;
 
                 // 데이터 갱신 및 Firestore 저장
-                item.width = currentWidthPercent;
+                item.width = finalWidthPx;
                 try {
                     await db.collection('items').doc(itemId).update({
-                        width: currentWidthPercent
+                        width: finalWidthPx
                     });
-                    showToast(`크기가 ${currentWidthPercent}% 로 조절되었습니다.`);
+                    showToast(`크기가 ${finalWidthPx}px 로 조절되었습니다.`);
                 } catch (err) {
                     console.error("Resize save error:", err);
                 }
@@ -1907,7 +1912,7 @@
             window.addEventListener('mouseup', onMouseUp);
         }
 
-        // 크기 원래대로 복원 (더블클릭 시 100%로 리셋)
+        // 크기 원래대로 복원 (더블클릭 시 기본 슬라이더 크기로 리셋)
         async function resetCardSize(e, itemId) {
             e.preventDefault();
             e.stopPropagation();
@@ -1915,17 +1920,18 @@
             const item = allItems.find(it => it.id === itemId);
             if (!item) return;
 
-            item.width = 100;
+            delete item.width;
+            const baseGridSize = parseInt(document.getElementById('sizeSlider')?.value) || 280;
             const card = document.querySelector(`.board-item[data-id="${itemId}"]`);
             if (card) {
-                card.style.width = '100%';
+                card.style.width = `${baseGridSize}px`;
             }
 
             try {
                 await db.collection('items').doc(itemId).update({
-                    width: 100
+                    width: firebase.firestore.FieldValue.delete()
                 });
-                showToast("크기가 기본(100%)으로 복원되었습니다.");
+                showToast("크기가 기본 크기로 복원되었습니다.");
             } catch (err) {
                 console.error("Reset size error:", err);
             }
@@ -2228,10 +2234,14 @@
         }
 
         function handleSizeChange(val) {
-            const grid = document.getElementById('masonryGrid');
-            if (grid) {
-                grid.style.columnWidth = `${val}px`;
-            }
+            const cards = document.querySelectorAll('.board-item');
+            cards.forEach(card => {
+                const itemId = card.getAttribute('data-id');
+                const item = allItems.find(it => it.id === itemId);
+                if (!item || !item.width) {
+                    card.style.width = `${val}px`;
+                }
+            });
             try {
                 localStorage.setItem('moodboard_apple_size', val);
             } catch {}
