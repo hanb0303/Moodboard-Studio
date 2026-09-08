@@ -584,6 +584,14 @@
             box-shadow: 0 3px 0 0 #2997ff, 0 12px 32px rgba(0, 0, 0, 0.7);
         }
 
+        .board-item.drag-over-left {
+            box-shadow: -3px 0 0 0 #2997ff, 0 12px 32px rgba(0, 0, 0, 0.7);
+        }
+
+        .board-item.drag-over-right {
+            box-shadow: 3px 0 0 0 #2997ff, 0 12px 32px rgba(0, 0, 0, 0.7);
+        }
+
         .board-item:hover {
             transform: translateY(-2px);
             box-shadow: 0 12px 32px rgba(0, 0, 0, 0.7);
@@ -1733,7 +1741,7 @@
                     card.addEventListener('dragend', () => {
                         draggedItemId = null;
                         document.querySelectorAll('.board-item').forEach(el => {
-                            el.classList.remove('is-dragging', 'drag-over-top', 'drag-over-bottom');
+                            el.classList.remove('is-dragging', 'drag-over-top', 'drag-over-bottom', 'drag-over-left', 'drag-over-right');
                         });
                     });
 
@@ -1743,29 +1751,33 @@
                         e.dataTransfer.dropEffect = 'move';
 
                         const rect = card.getBoundingClientRect();
-                        const midY = rect.top + rect.height / 2;
-                        if (e.clientY < midY) {
-                            card.classList.add('drag-over-top');
-                            card.classList.remove('drag-over-bottom');
+                        const relX = (e.clientX - rect.left) / rect.width;
+                        const relY = (e.clientY - rect.top) / rect.height;
+
+                        card.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-over-left', 'drag-over-right');
+
+                        // 좌우 및 상하 위치 판단: 가로 배치가 우선되는 그리드 특성에 맞춰 좌/우/상/하 가이드라인 표시
+                        if (relX < 0.5) {
+                            card.classList.add('drag-over-left');
                         } else {
-                            card.classList.add('drag-over-bottom');
-                            card.classList.remove('drag-over-top');
+                            card.classList.add('drag-over-right');
                         }
                     });
 
                     card.addEventListener('dragleave', () => {
-                        card.classList.remove('drag-over-top', 'drag-over-bottom');
+                        card.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-over-left', 'drag-over-right');
                     });
 
                     card.addEventListener('drop', async (e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        card.classList.remove('drag-over-top', 'drag-over-bottom');
+                        card.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-over-left', 'drag-over-right');
 
                         if (!draggedItemId || draggedItemId === item.id) return;
 
                         const rect = card.getBoundingClientRect();
-                        const isInsertBefore = e.clientY < (rect.top + rect.height / 2);
+                        const relX = (e.clientX - rect.left) / rect.width;
+                        const isInsertBefore = relX < 0.5;
 
                         await handleItemReorder(draggedItemId, item.id, isInsertBefore);
                     });
