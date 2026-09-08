@@ -538,7 +538,7 @@
             transform: rotate(45deg) translate(-1px, -1px);
         }
 
-        /* Pinterest 스타일 버티컬 메이슨리 그리드 (빈틈없이 자동 밀착) */
+        /* Bento Grid 메이슨리 (빈틈없이 테트리스처럼 꽉 채워지는 가변 그리드) */
         .content-scroll-area {
             flex: 1;
             overflow-y: auto;
@@ -546,14 +546,15 @@
         }
 
         .masonry-grid {
-            column-width: 280px;
-            column-gap: 16px;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(var(--grid-cell-size, 260px), 1fr));
+            grid-auto-rows: 20px;
+            grid-auto-flow: dense;
+            gap: 16px;
             width: 100%;
         }
 
         .board-item {
-            break-inside: avoid;
-            margin-bottom: 16px;
             position: relative;
             background: var(--bg-card);
             border-radius: 12px;
@@ -562,12 +563,16 @@
             transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
             cursor: grab;
             user-select: none;
-            width: 100%;
-            display: block;
+            grid-column: span 1;
+            /* JS에서 이미지 높이에 따라 grid-row: span N 자동 계산 */
         }
 
         .board-item.span-2 {
-            column-span: all;
+            grid-column: span 2;
+        }
+
+        .board-item.span-3 {
+            grid-column: span 3;
         }
 
         .board-item:active {
@@ -1804,17 +1809,21 @@
                     } catch {}
                 }
 
-                // 개별 이미지 너비(크기) 적용 (기본 1컬럼, 와이드 2컬럼 span-2 지원)
-                if (item.span === 2 || (item.width && item.width >= 480)) {
-                    card.classList.add('span-2');
-                } else {
+                // 개별 이미지 너비(크기) 적용 (기본 1컬럼, 와이드 2컬럼 span-2, 대형 3컬럼 span-3 지원)
+                if (item.span === 3) {
+                    card.classList.add('span-3');
                     card.classList.remove('span-2');
+                } else if (item.span === 2 || (item.width && item.width >= 420)) {
+                    card.classList.add('span-2');
+                    card.classList.remove('span-3');
+                } else {
+                    card.classList.remove('span-2', 'span-3');
                 }
 
                 card.innerHTML = `
                     <div class="select-checkbox"></div>
                     <div class="img-wrapper ${isSquareItem ? 'is-square' : ''}">
-                        <img src="${item.src}" alt="Visual" loading="lazy">
+                        <img src="${item.src}" alt="Visual" loading="lazy" onload="resizeGridItem(this.closest('.board-item'))">
                         ${!isSelectionMode ? `
                             <div class="card-actions" onclick="event.stopPropagation()">
                                 ${!isShareMode ? `
@@ -1838,7 +1847,7 @@
                                 </div>
                             ` : ''}
                             ${!isShareMode ? `
-                                <div class="resize-handle" title="모서리를 드래그하여 크기 조절" onmousedown="startCardResize(event, '${item.id}')" onclick="event.stopPropagation()"></div>
+                                <div class="resize-handle" title="모서리를 드래그하여 크기 변경 (1칸 / 2칸 와이드)" onmousedown="startCardResize(event, '${item.id}')" onclick="event.stopPropagation()"></div>
                             ` : ''}
                         ` : ''}
                     </div>
@@ -1848,9 +1857,33 @@
             });
 
             lucide.createIcons();
+            setTimeout(resizeAllGridItems, 50);
         }
 
-        // --- 개별 이미지 크기 조절 (마우스 드래그) ---
+        // --- Bento Grid 높이 자동 맞춤 계산 (빈틈없이 테트리스 정렬) ---
+        function resizeGridItem(card) {
+            if (!card) return;
+            const grid = document.getElementById('masonryGrid');
+            if (!grid) return;
+            const rowHeight = 20; // grid-auto-rows: 20px
+            const rowGap = 16;    // gap: 16px
+            const imgWrapper = card.querySelector('.img-wrapper');
+            if (!imgWrapper) return;
+            const contentHeight = imgWrapper.getBoundingClientRect().height;
+            const rowSpan = Math.ceil((contentHeight + rowGap) / (rowHeight + rowGap));
+            card.style.gridRowEnd = `span ${rowSpan}`;
+        }
+
+        function resizeAllGridItems() {
+            const allCards = document.querySelectorAll('.board-item');
+            allCards.forEach(card => resizeGridItem(card));
+        }
+
+        window.addEventListener('resize', () => {
+            resizeAllGridItems();
+        });
+
+        // --- 개별 이미지 크기 조절 (1칸 ↔ 2칸 와이드 스냅 드래그) ---
         let activeResizingItemId = null;
         let isResizingJustFinished = false;
 
@@ -1867,12 +1900,12 @@
             activeResizingItemId = itemId;
             card.classList.add('is-resizing');
 
-            // HTML5 drag 앤 드롭 충돌 방지 위해 임시로 draggable 해제
             const wasDraggable = card.getAttribute('draggable');
             card.removeAttribute('draggable');
 
             const startX = e.clientX;
-            const startWidthPx = card.getBoundingClientRect().width;
+            const startSpan = card.classList.contains('span-3') ? 3 : (card.classList.contains('span-2') ? 2 : 1);
+            let currentSpan = startSpan;
 
             // 툴팁 생성
             let tooltip = card.querySelector('.resize-tooltip');
@@ -1881,19 +1914,30 @@
                 tooltip.className = 'resize-tooltip';
                 card.appendChild(tooltip);
             }
-            tooltip.innerText = `${Math.round(startWidthPx)}px`;
-
-            let finalWidthPx = Math.round(startWidthPx);
+            tooltip.innerText = `${currentSpan}칸 (${currentSpan === 1 ? '기본' : (currentSpan === 2 ? '와이드' : '대형')})`;
 
             function onMouseMove(moveEvent) {
                 moveEvent.preventDefault();
                 const deltaX = moveEvent.clientX - startX;
-                // 최소 100px에서 최대 1200px까지 자유롭게 리사이즈
-                const newWidthPx = Math.max(100, Math.min(1200, Math.round(startWidthPx + deltaX)));
                 
-                finalWidthPx = newWidthPx;
-                card.style.width = `${newWidthPx}px`;
-                tooltip.innerText = `${newWidthPx}px`;
+                // 마우스 드래그 거리에 따라 1칸 ↔ 2칸 ↔ 3칸으로 스냅 전환
+                if (deltaX > 140) {
+                    currentSpan = 2;
+                } else if (deltaX < -100) {
+                    currentSpan = 1;
+                } else {
+                    currentSpan = startSpan;
+                }
+
+                if (currentSpan === 2) {
+                    card.classList.add('span-2');
+                    card.classList.remove('span-3');
+                } else {
+                    card.classList.remove('span-2', 'span-3');
+                }
+
+                tooltip.innerText = `${currentSpan}칸 (${currentSpan === 1 ? '기본' : '와이드 2배'})`;
+                resizeGridItem(card);
             }
 
             async function onMouseUp(upEvent) {
@@ -1913,19 +1957,21 @@
                 }
                 activeResizingItemId = null;
 
-                // 드래그 종료 후 카드 클릭(라이트박스 열림 등) 방지
+                // 드래그 종료 후 클릭 방지
                 isResizingJustFinished = true;
                 setTimeout(() => {
                     isResizingJustFinished = false;
                 }, 250);
 
                 // 데이터 갱신 및 Firestore 저장
-                item.width = finalWidthPx;
+                item.span = currentSpan;
+                resizeAllGridItems();
+
                 try {
                     await db.collection('items').doc(itemId).update({
-                        width: finalWidthPx
+                        span: currentSpan
                     });
-                    showToast(`크기가 ${finalWidthPx}px 로 조절되었습니다.`);
+                    showToast(`크기가 ${currentSpan === 2 ? '와이드(2칸)' : '기본(1칸)'}으로 변경되었습니다.`);
                 } catch (err) {
                     console.error("Resize save error:", err);
                 }
@@ -2234,11 +2280,12 @@
         function handleSizeChange(val) {
             const grid = document.getElementById('masonryGrid');
             if (grid) {
-                grid.style.columnWidth = `${val}px`;
+                grid.style.setProperty('--grid-cell-size', `${val}px`);
             }
             try {
                 localStorage.setItem('moodboard_apple_size', val);
             } catch {}
+            resizeAllGridItems();
         }
 
         function initSlider() {
