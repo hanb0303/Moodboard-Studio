@@ -1843,8 +1843,13 @@
                 card.className = `board-item ${isSelectionMode ? 'selectable' : ''} ${isSelected ? 'selected' : ''}`;
                 card.setAttribute('data-id', item.id);
                 
-                // 마우스로 조절한 픽셀 크기 적용 (기본값은 상단 슬라이더 크기)
-                const cardWidth = item.width || baseWidth;
+                // 상단 슬라이더 기준 크기 및 개별 확대 비율 적용
+                let cardWidth = baseWidth;
+                if (item.customScale) {
+                    cardWidth = Math.round(baseWidth * item.customScale);
+                } else if (item.width) {
+                    cardWidth = item.width;
+                }
                 card.style.width = cardWidth + 'px';
                 
                 // 선택 모드 또는 공유 모드가 아닐 때만 드래그 앤 드롭 정렬 허용
@@ -2054,13 +2059,17 @@
                     isResizingJustFinished = false;
                 }, 250);
 
-                // 로컬 및 Firestore에 변경된 너비 저장
+                // 로컬 및 Firestore에 변경된 너비 및 배율 저장
+                const baseWidth = getBaseGridSize();
+                const customScale = parseFloat((currentWidth / baseWidth).toFixed(2));
                 item.width = currentWidth;
+                item.customScale = customScale;
                 if (pckry) pckry.layout();
 
                 try {
                     await db.collection('items').doc(itemId).update({
-                        width: currentWidth
+                        width: currentWidth,
+                        customScale: customScale
                     });
                     showToast(`${currentWidth}px 크기로 저장되었습니다.`);
                 } catch (err) {
@@ -2469,12 +2478,15 @@
                 localStorage.setItem('moodboard_apple_size', val);
             } catch {}
 
-            // 개별 커스텀 너비가 없는 카드들의 기본 너비 일괄 적용
+            // 상단 슬라이더 조절 시 전체 카드들의 크기를 즉시 스케일링 조절
             const cards = document.querySelectorAll('.board-item');
             cards.forEach(card => {
                 const id = card.getAttribute('data-id');
                 const item = allItems.find(it => it.id === id);
-                if (!item || !item.width) {
+                if (item && item.customScale) {
+                    // 개별 마우스 드래그로 조절했던 배율이 있으면 슬라이더 기준값에 맞춰 비례 스케일링
+                    card.style.width = Math.round(numVal * item.customScale) + 'px';
+                } else {
                     card.style.width = numVal + 'px';
                 }
             });
