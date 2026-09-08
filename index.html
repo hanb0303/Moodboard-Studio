@@ -695,47 +695,41 @@
             border-color: #ff453a;
         }
 
-        /* 개별 이미지 크기 조절 핸들 (우측 상단 및 우측 하단) */
+        /* 개별 이미지 크기 조절 모서리 영역 (우측 하단) */
         .resize-handle {
             position: absolute;
-            width: 22px;
-            height: 22px;
-            border-radius: 6px;
-            background: rgba(20, 20, 25, 0.75);
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            color: #ffffff;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            opacity: 0;
-            transition: opacity 0.2s ease, transform 0.15s ease, background 0.15s ease;
-            z-index: 20;
-            user-select: none;
-        }
-
-        .resize-handle.handle-tr {
-            top: 8px;
-            right: 8px;
-            cursor: nesw-resize;
-        }
-
-        .resize-handle.handle-br {
-            bottom: 8px;
-            right: 8px;
+            width: 28px;
+            height: 28px;
+            bottom: 0;
+            right: 0;
             cursor: nwse-resize;
+            z-index: 25;
+            user-select: none;
+            background: transparent;
         }
 
-        .board-item:hover .resize-handle {
-            opacity: 0.85;
+        .resize-handle::after {
+            content: '';
+            position: absolute;
+            bottom: 4px;
+            right: 4px;
+            width: 6px;
+            height: 6px;
+            border-right: 2px solid rgba(255, 255, 255, 0.35);
+            border-bottom: 2px solid rgba(255, 255, 255, 0.35);
+            border-bottom-right-radius: 2px;
+            opacity: 0;
+            transition: opacity 0.2s ease, border-color 0.2s ease;
+            pointer-events: none;
         }
 
-        .resize-handle:hover {
-            opacity: 1 !important;
-            background: #2997ff;
+        .board-item:hover .resize-handle::after {
+            opacity: 1;
+        }
+
+        .resize-handle:hover::after {
             border-color: #2997ff;
-            transform: scale(1.1);
+            opacity: 1;
         }
 
         .board-item.is-resizing {
@@ -1826,9 +1820,7 @@
                                 </div>
                             ` : ''}
                             ${!isShareMode ? `
-                                <div class="resize-handle handle-br" title="드래그하여 크기 조절 (더블클릭: 원래 크기)" onmousedown="startCardResize(event, '${item.id}')" ondblclick="resetCardSize(event, '${item.id}')" onclick="event.stopPropagation()">
-                                    <i data-lucide="scaling" style="width: 12px; height: 12px; color: #ffffff;"></i>
-                                </div>
+                                <div class="resize-handle" title="모서리를 드래그하여 크기 조절 (더블클릭: 원래 크기)" onmousedown="startCardResize(event, '${item.id}')" ondblclick="resetCardSize(event, '${item.id}')" onclick="event.stopPropagation()"></div>
                             ` : ''}
                         ` : ''}
                     </div>
