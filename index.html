@@ -450,6 +450,20 @@
             opacity: 1;
         }
 
+        .subfolder-tab.drag-over {
+            background: rgba(41, 151, 255, 0.35) !important;
+            border-color: #2997ff !important;
+            color: #ffffff !important;
+            transform: scale(1.06);
+            box-shadow: 0 0 12px rgba(41, 151, 255, 0.5);
+        }
+
+        .project-item.drag-over-folder {
+            background: rgba(41, 151, 255, 0.25) !important;
+            border-color: #2997ff !important;
+            color: #2997ff !important;
+        }
+
         .current-proj-info h2 {
             font-size: 16px;
             font-weight: 600;
@@ -1368,6 +1382,12 @@
 
                 itemEl.addEventListener('dragover', (e) => {
                     e.preventDefault();
+                    if (draggedItemId) {
+                        e.dataTransfer.dropEffect = 'move';
+                        itemEl.classList.add('drag-over-folder');
+                        return;
+                    }
+
                     if (!draggedProjectId || draggedProjectId === p.id) return;
                     e.dataTransfer.dropEffect = 'move';
 
@@ -1383,14 +1403,19 @@
                 });
 
                 itemEl.addEventListener('dragleave', () => {
-                    itemEl.classList.remove('drag-over-top', 'drag-over-bottom');
+                    itemEl.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-over-folder');
                 });
 
                 itemEl.addEventListener('drop', async (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    itemEl.classList.remove('drag-over-top', 'drag-over-bottom');
+                    itemEl.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-over-folder');
                     
+                    if (draggedItemId) {
+                        await moveItemToFolder(draggedItemId, p.id);
+                        return;
+                    }
+
                     if (!draggedProjectId || draggedProjectId === p.id) return;
 
                     const rect = itemEl.getBoundingClientRect();
@@ -1603,6 +1628,26 @@
                 <span class="tab-badge">${allCount}</span>
             `;
             allTab.onclick = () => selectProject(parentRoot.id);
+
+            // 이미지 드래그하여 루트 폴더로 이동
+            allTab.addEventListener('dragover', (e) => {
+                if (draggedItemId) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    allTab.classList.add('drag-over');
+                }
+            });
+            allTab.addEventListener('dragleave', () => {
+                allTab.classList.remove('drag-over');
+            });
+            allTab.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                allTab.classList.remove('drag-over');
+                if (draggedItemId) {
+                    await moveItemToFolder(draggedItemId, parentRoot.id);
+                }
+            });
+
             tabsBar.appendChild(allTab);
 
             // 2) 각각의 개별 하위 폴더 탭들
@@ -1618,6 +1663,26 @@
                     <span class="tab-badge">${subCount}</span>
                 `;
                 tab.onclick = () => selectProject(sub.id);
+
+                // 이미지 드래그하여 하위 폴더로 이동
+                tab.addEventListener('dragover', (e) => {
+                    if (draggedItemId) {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                        tab.classList.add('drag-over');
+                    }
+                });
+                tab.addEventListener('dragleave', () => {
+                    tab.classList.remove('drag-over');
+                });
+                tab.addEventListener('drop', async (e) => {
+                    e.preventDefault();
+                    tab.classList.remove('drag-over');
+                    if (draggedItemId) {
+                        await moveItemToFolder(draggedItemId, sub.id);
+                    }
+                });
+
                 tabsBar.appendChild(tab);
             });
 
@@ -1782,6 +1847,49 @@
                     url: targetUrl,
                     isSquare: true
                 });
+            }
+        // 이미지를 특정 폴더로 이동시키는 공통 함수 (단일 또는 다중 선택 일괄 이동)
+        async function moveItemToFolder(itemId, targetFolderId) {
+            if (!targetFolderId) return;
+            const targetProj = projects.find(p => p.id === targetFolderId);
+            const targetName = targetProj ? targetProj.name : '해당 폴더';
+
+            let itemsToMove = [];
+            if (isSelectionMode && selectedItemIds.has(itemId)) {
+                itemsToMove = Array.from(selectedItemIds);
+            } else {
+                itemsToMove = [itemId];
+            }
+
+            // 이동할 대상 중 이미 해당 폴더에 있는 것 제외
+            const validItemsToMove = itemsToMove.filter(id => {
+                const item = allItems.find(it => it.id === id);
+                return item && item.projectId !== targetFolderId;
+            });
+
+            if (validItemsToMove.length === 0) {
+                showToast(`이미 [${targetName}]에 있는 이미지입니다.`);
+                return;
+            }
+
+            const batch = db.batch();
+            validItemsToMove.forEach(id => {
+                batch.update(db.collection('items').doc(id), {
+                    projectId: targetFolderId,
+                    previousProjectId: firebase.firestore.FieldValue.delete()
+                });
+            });
+
+            try {
+                await batch.commit();
+                if (isSelectionMode) {
+                    selectedItemIds.clear();
+                    toggleSelectMode(false);
+                }
+                showToast(`선택한 ${validItemsToMove.length}개의 이미지를 [${targetName}] 폴더로 이동했습니다.`);
+            } catch (err) {
+                console.error("폴더 이동 오류:", err);
+                showToast("폴더 이동 중 오류가 발생했습니다.");
             }
         }
 
