@@ -695,6 +695,78 @@
             border-color: #ff453a;
         }
 
+        /* 개별 이미지 크기 조절 핸들 (우측 상단 및 우측 하단) */
+        .resize-handle {
+            position: absolute;
+            width: 22px;
+            height: 22px;
+            border-radius: 6px;
+            background: rgba(20, 20, 25, 0.75);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.2s ease, transform 0.15s ease, background 0.15s ease;
+            z-index: 20;
+            user-select: none;
+        }
+
+        .resize-handle.handle-tr {
+            top: 8px;
+            right: 8px;
+            cursor: nesw-resize;
+        }
+
+        .resize-handle.handle-br {
+            bottom: 8px;
+            right: 8px;
+            cursor: nwse-resize;
+        }
+
+        .board-item:hover .resize-handle {
+            opacity: 0.85;
+        }
+
+        .resize-handle:hover {
+            opacity: 1 !important;
+            background: #2997ff;
+            border-color: #2997ff;
+            transform: scale(1.1);
+        }
+
+        .board-item.is-resizing {
+            box-shadow: 0 0 0 2px #2997ff, 0 16px 40px rgba(0, 0, 0, 0.8) !important;
+            user-select: none;
+            cursor: nwse-resize !important;
+        }
+
+        .board-item.is-resizing * {
+            user-select: none;
+            pointer-events: none;
+        }
+
+        .resize-tooltip {
+            position: absolute;
+            bottom: calc(100% + 6px);
+            right: 0;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            color: #2997ff;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 3px 8px;
+            border-radius: 6px;
+            border: 1px solid rgba(41, 151, 255, 0.3);
+            white-space: nowrap;
+            pointer-events: none;
+            z-index: 30;
+        }
+
         .empty-state {
             display: flex;
             flex-direction: column;
@@ -1720,6 +1792,13 @@
                     } catch {}
                 }
 
+                // 개별 이미지 너비(크기) 적용 (비율 유지)
+                if (item.width) {
+                    card.style.width = typeof item.width === 'number' ? `${item.width}%` : item.width;
+                } else {
+                    card.style.width = '100%';
+                }
+
                 card.innerHTML = `
                     <div class="select-checkbox"></div>
                     <div class="img-wrapper ${isSquareItem ? 'is-square' : ''}">
@@ -1746,6 +1825,11 @@
                                     <span>${hostName}</span>
                                 </div>
                             ` : ''}
+                            ${!isShareMode ? `
+                                <div class="resize-handle handle-br" title="드래그하여 크기 조절 (더블클릭: 원래 크기)" onmousedown="startCardResize(event, '${item.id}')" ondblclick="resetCardSize(event, '${item.id}')" onclick="event.stopPropagation()">
+                                    <i data-lucide="scaling" style="width: 12px; height: 12px; color: #ffffff;"></i>
+                                </div>
+                            ` : ''}
                         ` : ''}
                     </div>
                 `;
@@ -1754,6 +1838,105 @@
             });
 
             lucide.createIcons();
+        }
+
+        // --- 개별 이미지 크기 조절 (마우스 드래그) ---
+        let activeResizingItemId = null;
+
+        function startCardResize(e, itemId) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const card = document.querySelector(`.board-item[data-id="${itemId}"]`);
+            if (!card) return;
+
+            const item = allItems.find(it => it.id === itemId);
+            if (!item) return;
+
+            activeResizingItemId = itemId;
+            card.classList.add('is-resizing');
+
+            // 카드 부모(또는 컬럼 기준)의 너비 측정
+            // masonry-grid 내에서 card의 offsetParent 또는 column 폭
+            const grid = document.getElementById('masonryGrid');
+            const colWidth = parseFloat(getComputedStyle(grid).columnWidth) || 280;
+
+            const startX = e.clientX;
+            const startWidthPx = card.offsetWidth;
+
+            // 툴팁 생성
+            let tooltip = card.querySelector('.resize-tooltip');
+            if (!tooltip) {
+                tooltip = document.createElement('div');
+                tooltip.className = 'resize-tooltip';
+                card.appendChild(tooltip);
+            }
+            const initialPercent = item.width ? (typeof item.width === 'number' ? item.width : parseInt(item.width)) : Math.round((startWidthPx / colWidth) * 100);
+            tooltip.innerText = `${Math.min(100, Math.max(30, initialPercent))}%`;
+
+            let currentWidthPercent = initialPercent;
+
+            function onMouseMove(moveEvent) {
+                const deltaX = moveEvent.clientX - startX;
+                const newWidthPx = startWidthPx + deltaX;
+                
+                // 30% ~ 100% 범위로 계산 (컬럼 폭 대비)
+                let pct = Math.round((newWidthPx / colWidth) * 100);
+                pct = Math.max(30, Math.min(100, pct));
+                
+                currentWidthPercent = pct;
+                card.style.width = `${pct}%`;
+                tooltip.innerText = `${pct}%`;
+            }
+
+            async function onMouseUp() {
+                window.removeEventListener('mousemove', onMouseMove);
+                window.removeEventListener('mouseup', onMouseUp);
+
+                card.classList.remove('is-resizing');
+                if (tooltip && tooltip.parentNode) {
+                    tooltip.parentNode.removeChild(tooltip);
+                }
+                activeResizingItemId = null;
+
+                // 데이터 갱신 및 Firestore 저장
+                item.width = currentWidthPercent;
+                try {
+                    await db.collection('items').doc(itemId).update({
+                        width: currentWidthPercent
+                    });
+                    showToast(`크기가 ${currentWidthPercent}% 로 조절되었습니다.`);
+                } catch (err) {
+                    console.error("Resize save error:", err);
+                }
+            }
+
+            window.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('mouseup', onMouseUp);
+        }
+
+        // 크기 원래대로 복원 (더블클릭 시 100%로 리셋)
+        async function resetCardSize(e, itemId) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const item = allItems.find(it => it.id === itemId);
+            if (!item) return;
+
+            item.width = 100;
+            const card = document.querySelector(`.board-item[data-id="${itemId}"]`);
+            if (card) {
+                card.style.width = '100%';
+            }
+
+            try {
+                await db.collection('items').doc(itemId).update({
+                    width: 100
+                });
+                showToast("크기가 기본(100%)으로 복원되었습니다.");
+            } catch (err) {
+                console.error("Reset size error:", err);
+            }
         }
 
         // 이미지 드래그 앤 드롭 순서 변경 처리
