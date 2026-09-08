@@ -1865,9 +1865,12 @@
             activeResizingItemId = itemId;
             card.classList.add('is-resizing');
 
-            const baseGridSize = parseInt(document.getElementById('sizeSlider')?.value) || 280;
+            // HTML5 drag 앤 드롭 충돌 방지 위해 임시로 draggable 해제
+            const wasDraggable = card.getAttribute('draggable');
+            card.removeAttribute('draggable');
+
             const startX = e.clientX;
-            const startWidthPx = card.offsetWidth;
+            const startWidthPx = card.getBoundingClientRect().width;
 
             // 툴팁 생성
             let tooltip = card.querySelector('.resize-tooltip');
@@ -1876,14 +1879,15 @@
                 tooltip.className = 'resize-tooltip';
                 card.appendChild(tooltip);
             }
-            tooltip.innerText = `${startWidthPx}px`;
+            tooltip.innerText = `${Math.round(startWidthPx)}px`;
 
-            let finalWidthPx = startWidthPx;
+            let finalWidthPx = Math.round(startWidthPx);
 
             function onMouseMove(moveEvent) {
+                moveEvent.preventDefault();
                 const deltaX = moveEvent.clientX - startX;
-                // 최소 100px에서 최대 900px까지 자유롭게 리사이즈
-                const newWidthPx = Math.max(100, Math.min(900, Math.round(startWidthPx + deltaX)));
+                // 최소 100px에서 최대 1200px까지 자유롭게 리사이즈
+                const newWidthPx = Math.max(100, Math.min(1200, Math.round(startWidthPx + deltaX)));
                 
                 finalWidthPx = newWidthPx;
                 card.style.width = `${newWidthPx}px`;
@@ -1895,10 +1899,13 @@
                     upEvent.preventDefault();
                     upEvent.stopPropagation();
                 }
-                window.removeEventListener('mousemove', onMouseMove);
+                window.removeEventListener('mousemove', onMouseMove, true);
                 window.removeEventListener('mouseup', onMouseUp, true);
 
                 card.classList.remove('is-resizing');
+                if (wasDraggable) {
+                    card.setAttribute('draggable', wasDraggable);
+                }
                 if (tooltip && tooltip.parentNode) {
                     tooltip.parentNode.removeChild(tooltip);
                 }
@@ -1908,7 +1915,7 @@
                 isResizingJustFinished = true;
                 setTimeout(() => {
                     isResizingJustFinished = false;
-                }, 200);
+                }, 250);
 
                 // 데이터 갱신 및 Firestore 저장
                 item.width = finalWidthPx;
@@ -1922,7 +1929,7 @@
                 }
             }
 
-            window.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('mousemove', onMouseMove, true);
             window.addEventListener('mouseup', onMouseUp, true);
         }
 
